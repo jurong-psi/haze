@@ -1,0 +1,914 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jurong Haze Check</title>
+<meta name="description" content="Live 24-hr PSI for Jurong East (NEA West region), Singapore: green at or below 200, red above 200.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#f6f5f1">
+<!-- home-screen install: no service worker on purpose, so the page never shows cached (stale) PSI -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Haze check">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f6f5f1;
+  --surface: #ffffff;
+  --ink: #141413;
+  --ink-2: #57564f;
+  --muted: #8d8b84;
+  --grid: #ebe9e2;
+  --axis: #cfcdc4;
+  --border: rgba(20,20,19,0.08);
+  --shadow: 0 1px 2px rgba(20,20,19,0.04), 0 8px 24px rgba(20,20,19,0.06);
+  --west: #2a78d6;
+  --other: #c4c2ba;
+  --good: #0ca30c;
+  --moderate: #8d8b84;
+  --unhealthy: #fab219;
+  --very: #ec835a;
+  --hazard: #d03b3b;
+  --wash: 0.09;
+  --ok-a: #0b6e45; --ok-b: #13955d;
+  --wfh-a: #a4161a; --wfh-b: #d8342c;
+  --stale-a: #4a4844; --stale-b: #6d6a64;
+  --neg-ink: #b42318; --neg-bg: rgba(208,59,59,0.10);
+  --pos-ink: #006300; --pos-bg: rgba(12,163,12,0.10);
+  --chip-bg: rgba(20,20,19,0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0f0f0e; --surface: #1a1a19; --ink: #f2f1ed; --ink-2: #c3c2b7; --muted: #8d8b84;
+    --grid: #2a2a28; --axis: #3a3a37; --border: rgba(255,255,255,0.08);
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.25);
+    --west: #3987e5; --other: #4c4b47; --wash: 0.13;
+    --neg-ink: #ff8a80; --neg-bg: rgba(230,103,103,0.16); --pos-ink: #5fd35f; --pos-bg: rgba(12,163,12,0.18);
+    --chip-bg: rgba(255,255,255,0.12);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0f0f0e; --surface: #1a1a19; --ink: #f2f1ed; --ink-2: #c3c2b7; --muted: #8d8b84;
+  --grid: #2a2a28; --axis: #3a3a37; --border: rgba(255,255,255,0.08);
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.25);
+  --west: #3987e5; --other: #4c4b47; --wash: 0.13;
+    --neg-ink: #ff8a80; --neg-bg: rgba(230,103,103,0.16); --pos-ink: #5fd35f; --pos-bg: rgba(12,163,12,0.18);
+    --chip-bg: rgba(255,255,255,0.12);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 880px; margin: 0 auto; padding: 16px 16px 48px; }
+
+/* top bar */
+.top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 2px 14px; }
+.brand { font-weight: 700; letter-spacing: -0.01em; font-size: 15px; white-space: nowrap; }
+.brand span { color: var(--muted); font-weight: 500; }
+.live { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px rgba(12,163,12,0.18); }
+.live.off i { background: var(--muted); box-shadow: none; }
+
+/* the answer */
+.hero {
+  position: relative; overflow: hidden; color: #fff; border-radius: 28px;
+  padding: 28px 28px 30px; box-shadow: var(--shadow);
+  background: linear-gradient(140deg, var(--stale-a), var(--stale-b));
+  transition: background 0.4s;
+}
+.hero.ok { background: linear-gradient(140deg, var(--ok-a), var(--ok-b)); }
+.hero.wfh { background: linear-gradient(140deg, var(--wfh-a), var(--wfh-b)); }
+.hero::after {
+  content: ""; position: absolute; right: -80px; top: -80px; width: 280px; height: 280px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.16), rgba(255,255,255,0) 70%); pointer-events: none;
+}
+.eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.85; }
+.answer { display: flex; align-items: center; gap: 14px; margin: 10px 0 6px; }
+.answer svg { flex: none; width: 64px; height: 64px; }
+.answer h1 { margin: 0; font-size: clamp(64px, 16vw, 104px); line-height: 0.95; font-weight: 800; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.answer h1.word { font-size: clamp(34px, 8vw, 56px); letter-spacing: -0.03em; }
+.why { margin: 0; font-size: 17px; opacity: 0.95; max-width: 34em; }
+.why b { font-weight: 700; }
+.today {
+  display: inline-flex; align-items: center; gap: 8px; margin: 14px 0 0; padding: 7px 12px; border-radius: 12px;
+  font-size: 14px; font-weight: 600; background: rgba(0,0,0,0.16); max-width: 100%;
+}
+.today:empty { display: none; }
+.today i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #fff; }
+.today.was-over i { background: #ffb4ab; box-shadow: 0 0 0 2px rgba(255,255,255,0.6); }
+.note {
+  display: none; margin-top: 14px; padding: 8px 12px; border-radius: 12px; font-size: 14px; font-weight: 600;
+  background: rgba(255,255,255,0.16); width: fit-content; max-width: 100%;
+}
+
+.hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 24px; align-items: start; }
+.trend {
+  background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.22); border-radius: 18px;
+  padding: 14px 16px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.trend-k { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.85; }
+.trend-v { display: flex; align-items: center; gap: 8px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin-top: 4px; }
+.trend-v #tr-arrow { font-size: 22px; line-height: 1; }
+.trend-say { font-size: 13px; opacity: 0.92; margin-top: 2px; }
+.trend-sig { list-style: none; margin: 10px 0 0; padding: 10px 0 0; border-top: 1px solid rgba(255,255,255,0.2); font-size: 12.5px; }
+.trend-sig li { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; font-variant-numeric: tabular-nums; }
+.trend-sig li span:first-child { opacity: 0.85; }
+.trend-sig li span:last-child { font-weight: 600; white-space: nowrap; }
+.trend-foot { font-size: 11.5px; opacity: 0.75; margin-top: 8px; }
+
+/* gauge */
+.gauge { margin-top: 26px; }
+.gauge-track { position: relative; height: 10px; border-radius: 999px; background: rgba(255,255,255,0.22); }
+.gauge-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: rgba(255,255,255,0.92); width: 0; }
+.gauge-line { position: absolute; top: -7px; bottom: -7px; width: 2px; margin-left: -1px; background: #fff; border-radius: 2px; }
+.gauge-scale { position: relative; height: 18px; margin-top: 10px; font-size: 12px; opacity: 0.85; font-variant-numeric: tabular-nums; }
+.gauge-scale span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.gauge-scale span:first-child { transform: none; }
+.gauge-scale span:last-child { transform: translateX(-100%); }
+.gauge-scale b { font-weight: 700; }
+
+/* tiles */
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+.tile { background: var(--surface); border-radius: 20px; padding: 16px 18px; box-shadow: var(--shadow); min-width: 0; }
+.tile .k { color: var(--muted); font-size: 13px; font-weight: 500; }
+.tile .v { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.tile .v small { font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.tile .d { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+/* light green = better than before, light pink = worse; no tint when unchanged or unknown */
+/* key words in the NEA outlook line: grey for no clear change, pink/green for more/less haze */
+.chip { display: inline-block; padding: 1px 8px; border-radius: 6px; font-weight: 600; color: var(--ink); background: var(--chip-bg); }
+.chip.neg { color: var(--neg-ink); background: var(--neg-bg); }
+.chip.pos { color: var(--pos-ink); background: var(--pos-bg); }
+.tile.better { background: linear-gradient(var(--pos-bg), var(--pos-bg)), var(--surface); }
+.tile.worse { background: linear-gradient(var(--neg-bg), var(--neg-bg)), var(--surface); }
+
+/* cards */
+.card { background: var(--surface); border-radius: 22px; padding: 20px; margin-top: 14px; box-shadow: var(--shadow); }
+.card-h { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+h2 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+.sub { color: var(--ink-2); margin: 2px 0 0; font-size: 14px; }
+.seg { display: inline-flex; background: var(--page); border-radius: 999px; padding: 3px; }
+.seg button {
+  background: transparent; color: var(--ink-2); border: 0; padding: 6px 14px; border-radius: 999px;
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); font-size: 13px; margin: 10px 0 4px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .ln { width: 18px; height: 0; border-top: 2px solid; display: inline-block; }
+.chart { position: relative; width: 100%; margin-top: 6px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+.chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-family: inherit; }
+.chart .band-label { fill: var(--ink-2); }
+.chart .ref-label { fill: var(--hazard); font-weight: 600; }
+.chart .end-label { fill: var(--ink); font-size: 13px; font-weight: 700; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
+.tip {
+  position: absolute; pointer-events: none; display: none; min-width: 150px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.14); padding: 9px 12px; font-size: 13px; z-index: 2;
+}
+.tip .t { color: var(--muted); margin-bottom: 4px; }
+.tip .row { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; }
+.tip .row.main { font-weight: 700; }
+
+/* details */
+details.card { padding: 0; }
+details.card > summary {
+  list-style: none; cursor: pointer; padding: 18px 20px; font-weight: 600; display: flex; justify-content: space-between; align-items: center;
+}
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary::after { content: "Show"; color: var(--muted); font-weight: 500; font-size: 14px; }
+details.card[open] > summary::after { content: "Hide"; }
+.details-body { padding: 0 20px 20px; }
+.details-body h3 { font-size: 15px; margin: 22px 0 0; }
+.explain { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+.explain li + li { margin-top: 6px; }
+.explain b { color: var(--ink); font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; font-size: 13px; }
+td.hot { color: var(--hazard); font-weight: 700; }
+.tablewrap { overflow-x: auto; margin-top: 8px; }
+.nea p { margin: 12px 0 0; font-size: 15px; line-height: 1.65; color: var(--ink); }
+.hl { padding: 1px 4px; border-radius: 5px; font-weight: 600; white-space: normal; }
+.hl.neg { color: var(--neg-ink); background: var(--neg-bg); }
+.hl.pos { color: var(--pos-ink); background: var(--pos-bg); }
+.nea-key { color: var(--muted); font-size: 12.5px; margin: 14px 0 0; }
+.nea-key .hl { font-weight: 600; }
+.nea-key a { color: inherit; }
+
+footer { color: var(--muted); font-size: 12px; margin-top: 22px; padding: 0 4px; line-height: 1.6; }
+footer a { color: inherit; }
+
+@media (max-width: 760px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 18px; }
+}
+@media (max-width: 620px) {
+  .hero { padding: 24px 20px 24px; border-radius: 24px; }
+  .answer svg { width: 52px; height: 52px; }
+  .why { font-size: 16px; }
+  .tiles { grid-template-columns: 1fr 1fr; }
+  .tiles .tile:last-child { grid-column: 1 / -1; }
+  .card { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div class="brand">Haze check <span>· Jurong East</span></div>
+    <div class="live off" id="live"><i></i><span id="live-t">Connecting…</span></div>
+  </header>
+
+  <section class="hero" id="hero" aria-live="polite">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow" id="h-when">Checking the latest reading</div>
+        <div class="answer">
+          <svg id="h-icon" viewBox="0 0 52 52" aria-hidden="true"></svg>
+          <h1 id="h-answer">…</h1>
+        </div>
+        <p class="why" id="h-why"></p>
+        <p class="today" id="h-today"></p>
+      </div>
+      <aside class="trend" id="trend" aria-label="Haze trend by day">
+        <div class="trend-k">Haze trend, day by day</div>
+        <div class="trend-v"><span id="tr-arrow"></span><span id="tr-label">…</span></div>
+        <div class="trend-say" id="tr-say"></div>
+        <ul class="trend-sig" id="tr-sig"></ul>
+      </aside>
+    </div>
+    <div class="gauge" aria-hidden="true">
+      <div class="gauge-track">
+        <div class="gauge-fill" id="g-fill"></div>
+        <div class="gauge-line" style="left:66.667%"></div>
+      </div>
+      <div class="gauge-scale">
+        <span style="left:0">0</span>
+        <span style="left:33.333%">100</span>
+        <span style="left:66.667%"><b>200</b></span>
+        <span style="left:100%">300</span>
+      </div>
+    </div>
+    <div class="note" id="h-note"></div>
+  </section>
+
+  <section class="tiles">
+    <div class="tile"><div class="k">Last hour</div><div class="v" id="t1">–</div><div class="d" id="t1d"></div></div>
+    <div class="tile"><div class="k">Same time yesterday</div><div class="v" id="t2">–</div><div class="d" id="t2d"></div></div>
+    <div class="tile"><div class="k">Last hour's PM2.5 (not PSI)</div><div class="v" id="t3">–</div><div class="d" id="t3d"></div></div>
+  </section>
+
+  <section class="card">
+    <div class="card-h">
+      <div>
+        <h2>West region PSI</h2>
+        <p class="sub">24-hour PSI. Green at or below 200, red above. The scale zooms to fit the readings.</p>
+      </div>
+      <div class="seg" role="group" aria-label="Time range">
+        <button data-range="24" aria-pressed="true">24 h</button>
+        <button data-range="168">7 days</button>
+        <button data-range="all">Since 1 Oct</button>
+      </div>
+    </div>
+    <div class="chart" id="main-chart"></div>
+  </section>
+
+  <section class="card" aria-labelledby="nea-h">
+    <h2 id="nea-h">NEA haze outlook</h2>
+    <p class="sub" id="nea-meta">Loading…</p>
+    <div id="nea-outlook" class="nea"></div>
+    <p class="nea-key"><span class="hl neg">Red</span> points to more haze, <span class="hl pos">green</span> to less.
+      Northern ASEAN parts left out. Full text on <a href="https://www.haze.gov.sg">haze.gov.sg</a>.</p>
+  </section>
+
+  <details class="card" id="more">
+    <summary>More detail: what the numbers mean, PSI by region, hourly PM2.5, daily table</summary>
+    <div class="details-body">
+      <h3 id="numbers">What the numbers mean</h3>
+      <ul class="explain">
+        <li><b>24-hour PSI decides green or red.</b> It is NEA's official air-quality index and the measure Singapore's
+          Ministry of Manpower points employers to. It is a rolling average: every hour the oldest hour drops out and
+          the newest comes in, so it is published hourly but moves slowly and steadily.</li>
+        <li><b>1-hour PM2.5 is a different measure.</b> It is the amount of fine smoke particles in the air over the last
+          hour, in µg/m³. It reacts first, but swings a lot during the day (highest in mid-afternoon), so it is shown as an
+          early sign only.</li>
+        <li><b>The two are on different scales.</b> A PM2.5 reading of 200 µg/m³ is not a PSI of 200, so the PM2.5 number
+          cannot be compared with the 200 line.</li>
+        <li><b>They measure the same smoke.</b> NEA scores six pollutants and the PSI is the highest score; during this haze
+          that is always PM2.5. So the PSI is, in effect, the past 24 hours of PM2.5 turned into an index.</li>
+      </ul>
+
+      <h3>24-hour PSI, all five regions</h3>
+      <p class="sub">PSI is NEA's air-quality index (no unit), the same number as at the top of the page. West (Jurong East) is highlighted; the other four regions are for comparison. Shaded bands are NEA's PSI health categories.</p>
+      <div class="legend">
+        <span><i class="ln" style="border-color:var(--west)"></i>West</span>
+        <span><i class="ln" style="border-color:var(--other);border-top-width:1px"></i>North, South, East, Central</span>
+      </div>
+      <div class="chart" id="psi-chart"></div>
+
+      <h3>1-hour PM2.5 concentration, West (µg/m³)</h3>
+      <p class="sub">Not the PSI. This is the amount of fine smoke particles measured in the last hour, so it shows haze arriving or clearing first; the 24-hour PSI follows over the next day. Shaded bands are NEA's 1-hour PM2.5 bands.</p>
+      <div class="chart" id="pm-chart"></div>
+
+      <h3>Daily summary, West</h3>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Date</th><th>PSI max</th><th>PSI min</th><th>PSI mean</th><th>Hours PSI &gt;200</th><th>Max 1-hr PM2.5 (µg/m³)</th></tr></thead>
+          <tbody id="tbl"></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <footer>
+    Jurong East has no NEA station of its own; NEA reports it as part of the West region, which is what this page uses.
+    Green means West 24-hour PSI is 200 or below; red means above 200.
+    The latest reading is fetched live from <a href="https://data.gov.sg">data.gov.sg</a> each time you open the page and every 5 minutes after.
+    Contains information from PSI and PM2.5 readings accessed from data.gov.sg, made available under the terms of the
+    <a href="https://data.gov.sg/open-data-licence">Singapore Open Data Licence version 1.0</a>.
+    Unofficial; for official advisories see <a href="https://www.haze.gov.sg">haze.gov.sg</a>.
+    Page opens are counted with <a href="https://www.goatcounter.com">GoatCounter</a> (no cookies, no personal data).
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var PSI_BANDS = [
+    { lo: 0, hi: 50, name: "Good", c: "--good" },
+    { lo: 51, hi: 100, name: "Moderate", c: "--moderate" },
+    { lo: 101, hi: 200, name: "Unhealthy", c: "--unhealthy" },
+    { lo: 201, hi: 300, name: "Very unhealthy", c: "--very" },
+    { lo: 301, hi: 500, name: "Hazardous", c: "--hazard" }
+  ];
+  var PM_BANDS = [
+    { lo: 0, hi: 55, name: "Normal", c: "--good", say: "NEA Band I (Normal)" },
+    { lo: 56, hi: 150, name: "Elevated", c: "--unhealthy", say: "NEA Band II (Elevated)" },
+    { lo: 151, hi: 250, name: "High", c: "--very", say: "NEA Band III (High)" },
+    { lo: 251, hi: 500, name: "Very high", c: "--hazard", say: "NEA Band IV (Very high)" }
+  ];
+  // A reading for HH:00 is published between HH:00 and ~HH:47, so a healthy "latest" can be up to ~1h47m old.
+  var STALE_HOURS = 2.25;
+  var WFH_ABOVE = 200;
+  // filled in by build.py (hash of this file); data.json carries the newest one, see refresh()
+  var PAGE_VERSION = "5564c69c69";
+  var PM_STEADY = 5;    // µg/m³: smaller 1-hr PM2.5 changes don't tint the tile
+  var NEAR = 180;       // show "close to the line" from here up to 200
+  var LIVE = "https://api-open.data.gov.sg/v2/real-time/api/";
+  var D, mainRange = 24, liveAt = null, liveOk = null;
+
+  var ICONS = {
+    ok: '<circle cx="26" cy="26" r="24" fill="rgba(255,255,255,0.2)"/><path d="M15 27l7 7 15-16" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    wfh: '<circle cx="26" cy="26" r="24" fill="rgba(255,255,255,0.2)"/><path d="M17 17l18 18M35 17L17 35" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>',
+    stale: '<circle cx="26" cy="26" r="24" fill="rgba(255,255,255,0.2)"/><path d="M26 15v13M26 35v1" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>'
+  };
+
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function bandOf(v, bands) { for (var i = 0; i < bands.length; i++) if (v <= bands[i].hi) return bands[i]; return bands[bands.length - 1]; }
+  function $(id) { return document.getElementById(id); }
+  var fmtFull = new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  var fmtDay = new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", day: "numeric", month: "short" });
+  var fmtWeekday = new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", weekday: "short", day: "numeric", month: "short" });
+  var fmtHour = new Intl.DateTimeFormat("en-SG", { timeZone: "Asia/Singapore", hour: "2-digit", minute: "2-digit", hour12: false });
+  function sgtIso(ms) { return new Date(ms + 8 * 3600e3).toISOString().slice(0, 19) + "+08:00"; }
+  function sgtHour(t) { return (new Date(t).getUTCHours() + 8) % 24; }
+  function lastIdx(arr) { for (var i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return i; return -1; }
+  function valueAt(arr, ms) { var i = D.ts.indexOf(sgtIso(ms)); return i < 0 ? null : arr[i]; }
+  function el(tag, attrs, parent) {
+    var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function signed(d) { return d > 0 ? "▲ " + d : d < 0 ? "▼ " + Math.abs(d) : "0"; }
+
+  // One factual line about today (SGT): has West PSI gone above 200, and when. Facts only, no advice.
+  function todaySummary(i) {
+    var w = D.psi24.west, hourMs = 3600e3, today = sgtIso(Date.now()).slice(0, 10);
+    var t = new Date(D.ts[i]).getTime();
+    var hrs = [];
+    D.ts.forEach(function (ts, j) { if (ts.slice(0, 10) === today && w[j] != null) hrs.push(j); });
+    if (!hrs.length) return null;
+    function hm(j) { return fmtHour.format(new Date(D.ts[j])); }
+    if (w[i] > WFH_ABOVE) {
+      // walk back through hours above 200 to find when this spell started; a few missing hours
+      // (saved history behind, newest hour filled in live) don't end the spell
+      var start = i, gap = 0;
+      while (gap <= 6) {
+        var prevTs = sgtIso(new Date(D.ts[start]).getTime() - (gap + 1) * hourMs), k = D.ts.indexOf(prevTs);
+        if (k >= 0 && w[k] != null) {
+          if (w[k] <= WFH_ABOVE) break;
+          start = k; gap = 0;
+        } else gap++;
+      }
+      var since = D.ts[start].slice(0, 10) === today ? hm(start) : "yesterday " + hm(start);
+      return { cls: "over", text: "Above 200 since " + since };
+    }
+    var over = hrs.filter(function (j) { return w[j] > WFH_ABOVE; });
+    if (over.length) {
+      return { cls: "was-over", text: "Today: above 200 for " + over.length + (over.length === 1 ? " hour" : " hours")
+        + ", " + hm(over[0]) + "–" + hm(over[over.length - 1]) + " · now 200 or below" };
+    }
+    var top = hrs.reduce(function (a, j) { return w[j] > w[a] ? j : a; }, hrs[0]);
+    return { cls: "", text: "Today so far: highest " + w[top] + " at " + hm(top) + " · not above 200" };
+  }
+  function renderToday(i, state) {
+    var el2 = $("h-today"), r = state === "stale" ? null : todaySummary(i);
+    el2.className = "today" + (r && r.cls ? " " + r.cls : "");
+    el2.innerHTML = r ? "<i></i>" + esc(r.text) : "";
+  }
+
+  function renderHero() {
+    var w = D.psi24.west, i = lastIdx(w);
+    var hero = $("hero"), note = $("h-note");
+    if (i < 0) return;
+    var v = w[i], t = new Date(D.ts[i]), ageH = (Date.now() - t.getTime()) / 3600e3;
+    var state = ageH > STALE_HOURS ? "stale" : v > WFH_ABOVE ? "wfh" : "ok";
+    hero.className = "hero " + state;
+    $("h-icon").innerHTML = ICONS[state];
+    $("h-when").textContent = "Reading for " + fmtFull.format(t) + " SGT";
+    note.style.display = "none";
+    var h1 = $("h-answer");
+    h1.className = state === "stale" ? "word" : "";
+    if (state === "stale") {
+      h1.textContent = "No recent reading";
+      $("h-why").innerHTML = "The newest West PSI we have is " + Math.floor(ageH) + " hours old (<b>" + v + "</b>). See <a href=\"https://www.haze.gov.sg\" style=\"color:#fff\">haze.gov.sg</a>.";
+    } else {
+      h1.textContent = v;
+      $("h-why").innerHTML = "West region 24-hour PSI · " + (v > WFH_ABOVE ? "above 200" : "200 or below");
+      var prev = valueAt(w, t.getTime() - 3600e3);
+      if (state === "ok" && v >= NEAR) {
+        note.style.display = "block";
+        note.textContent = prev != null && v > prev ? "Close to 200 and rising" : "Close to 200";
+      }
+    }
+    renderToday(i, state);
+    $("g-fill").style.width = Math.min(100, v / 3) + "%";
+    var live = $("live");
+    live.className = "live" + (liveAt ? "" : " off");
+    renderClock();
+  }
+
+  // ---- Day-by-day haze trend --------------------------------------------------------------
+  // Five signals each vote up (+1), down (-1) or flat (0):
+  //   1. 5-day direction: least-squares slope of West PSI at the same clock hour on each of the last 5 days
+  //   2. Past 24 hours: PSI now vs the same hour yesterday
+  //   3. PM2.5: mean of the last 24 hourly readings vs the 24 before (moves before the 24-hr PSI does)
+  //   4. NEA outlook: NEA's daily haze outlook as read by AI (outlook.py) — worse +1, better -1, same/unclear 0
+  //   5. Rain forecast: NEA's 24-hour forecast for the West region — showers -1, haze +1, neither 0
+  // Decision rule: count only the signals that are AVAILABLE; a strict majority of them (more than
+  // half) pointing the same way decides "rising" / "easing", anything else is "uncertain". So when
+  // the AI step or the forecast is down, the verdict still comes out of the remaining signals
+  // (3 signals → 2 needed, 4 → 3, 5 → 3).
+  var TREND = {
+    useOutlook: true,       // decision switch: false = never use the AI-read NEA outlook
+    useRain: true,          // decision switch: false = never use the rain forecast
+    outlookMaxAgeH: 36,     // an outlook older than this is treated as unavailable
+    slope: 5, day: 8, pm: 0.10, days: 5
+  };
+  // ?ai=off in the URL forces the no-AI path (for checking the fallback)
+  try { if (new URLSearchParams(location.search).get("ai") === "off") TREND.useOutlook = false; } catch (e) {}
+  var OUTLOOK = null, RAIN = null;
+
+  function outlookVote() {
+    if (!TREND.useOutlook) return { ok: false, why: "switched off" };
+    if (!OUTLOOK) return { ok: false, why: "unavailable" };
+    if (OUTLOOK.status !== "ok") return { ok: false, why: "AI unavailable" };
+    var ageH = (Date.now() - new Date(OUTLOOK.checked_at).getTime()) / 3600e3;
+    if (!(ageH <= TREND.outlookMaxAgeH)) return { ok: false, why: "out of date" };
+    var v = { worse: 1, better: -1, same: 0, unclear: 0 }[OUTLOOK.direction];
+    if (v === undefined) return { ok: false, why: "unavailable" };
+    return { ok: true, vote: v, text: OUTLOOK.direction };
+  }
+
+  function rainVote() {
+    if (!TREND.useRain) return { ok: false, why: "switched off" };
+    if (!RAIN || !RAIN.length) return { ok: false, why: "unavailable" };
+    var wet = RAIN.filter(function (p) { return /shower|rain|thunder/i.test(p.text); });
+    var hazy = RAIN.filter(function (p) { return /haz/i.test(p.text); });
+    var v = wet.length && !hazy.length ? -1 : hazy.length && !wet.length ? 1 : 0;
+    return { ok: true, vote: v, text: wet.length ? wet[0].text.toLowerCase() : hazy.length ? hazy[0].text.toLowerCase() : "no rain" };
+  }
+
+  function trendAnalysis() {
+    var w = D.psi24.west, i = lastIdx(w);
+    if (i < 0) return null;
+    var t = new Date(D.ts[i]).getTime(), pts = [];
+    for (var k = TREND.days - 1; k >= 0; k--) {
+      var v = valueAt(w, t - k * 24 * 3600e3);
+      if (v != null) pts.push([TREND.days - 1 - k, v]);
+    }
+    var sig = [];
+    function vote(x, th) { return x >= th ? 1 : x <= -th ? -1 : 0; }
+    function num(x) { x = Math.round(x); return (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x); }
+    if (pts.length >= 3) {
+      var mx = 0, my = 0;
+      pts.forEach(function (p) { mx += p[0]; my += p[1]; }); mx /= pts.length; my /= pts.length;
+      var nu = 0, de = 0;
+      pts.forEach(function (p) { nu += (p[0] - mx) * (p[1] - my); de += (p[0] - mx) * (p[0] - mx); });
+      var slope = nu / de;
+      sig.push({ name: pts.length + "-day direction", ok: true, vote: vote(slope, TREND.slope), text: num(slope) + " a day" });
+    } else sig.push({ name: "5-day direction", ok: false, why: "not enough days" });
+    var yday = valueAt(w, t - 24 * 3600e3);
+    sig.push(yday == null ? { name: "Past 24 hours", ok: false, why: "no reading" }
+      : { name: "Past 24 hours", ok: true, vote: vote(w[i] - yday, TREND.day), text: num(w[i] - yday) });
+    function pmMean(fromH, toH) {
+      var s = 0, n = 0;
+      for (var h = fromH; h < toH; h++) { var x = valueAt(D.pm25_1h.west, t - h * 3600e3); if (x != null) { s += x; n++; } }
+      return n >= 18 ? s / n : null;
+    }
+    var pmNow = pmMean(0, 24), pmPrev = pmMean(24, 48);
+    if (pmNow != null && pmPrev) {
+      var c = pmNow / pmPrev - 1;
+      // one decimal, truncated (not rounded) so a value just inside the ±10% threshold (−9.96%) shows −9.9%, matching its flat arrow
+      sig.push({ name: "PM2.5, 24h average", ok: true, vote: vote(c, TREND.pm), text: (c > 0 ? "+" : c < 0 ? "−" : "") + (Math.floor(Math.abs(c) * 1000) / 10).toFixed(1) + "%" });
+    } else sig.push({ name: "PM2.5, 24h average", ok: false, why: "not enough readings" });
+    var o = outlookVote(); o.name = "NEA outlook (AI-read)"; sig.push(o);
+    var r = rainVote(); r.name = "Rain forecast, 24h"; sig.push(r);
+
+    var used = sig.filter(function (s) { return s.ok; });
+    var need = Math.floor(used.length / 2) + 1;
+    var ups = used.filter(function (s) { return s.vote > 0; }).length, downs = used.filter(function (s) { return s.vote < 0; }).length;
+    var state = used.length < 2 ? "unsure" : ups >= need ? "up" : downs >= need ? "down" : "unsure";
+    return { state: state, signals: sig, used: used.length, need: need, days: pts.length };
+  }
+
+  function renderTrend() {
+    var r = trendAnalysis(), box = $("trend");
+    if (!r) { box.style.display = "none"; return; }
+    box.style.display = "";
+    $("tr-arrow").textContent = { up: "↗", down: "↘", unsure: "↔" }[r.state];
+    $("tr-label").textContent = { up: "Still rising", down: "Easing", unsure: "Uncertain" }[r.state];
+    $("tr-say").textContent = {
+      up: "Most signals point to more haze.",
+      down: "Most signals point to less haze.",
+      unsure: "Signals disagree or are flat. No clear direction yet."
+    }[r.state];
+    function dir(v) { return v > 0 ? "↑ " : v < 0 ? "↓ " : "→ "; }
+    var ul = $("tr-sig"); ul.innerHTML = "";
+    r.signals.forEach(function (s) {
+      var li = document.createElement("li");
+      var a = document.createElement("span"); a.textContent = s.name;
+      var b = document.createElement("span"); b.textContent = s.ok ? dir(s.vote) + s.text : s.why;
+      if (!s.ok) { li.style.opacity = "0.6"; }
+      if (s.name.indexOf("NEA") === 0 && OUTLOOK && OUTLOOK.quote) li.title = "NEA: “" + OUTLOOK.quote + "”";
+      li.appendChild(a); li.appendChild(b); ul.appendChild(li);
+    });
+    // r.used / r.need are still computed (and drive the verdict) but are not shown on the page
+    renderOutlookDetail();
+  }
+
+  // Fixed vocabulary (not AI) decides the colours, so the same NEA sentence is always marked the same way.
+  // Longest phrases first so "prolonged dry conditions" wins over "dry conditions".
+  var NEA_NEG = ["continued risk of severe transboundary haze occurrence", "risk of severe transboundary haze",
+    "prolonged dry conditions", "relatively drier conditions", "dry conditions", "drier conditions", "remain elevated",
+    "moderate to dense transboundary smoke haze", "moderate to dense smoke haze", "dense smoke haze", "transboundary smoke haze",
+    "hotspots were detected", "very unhealthy", "unhealthy", "hazardous", "worsen\\w*", "deteriorat\\w*", "intensif\\w*", "escalat\\w*"];
+  var NEA_POS = ["may improve", "improve\\w*", "showers", "rain\\w*", "remain subdued", "subdued", "eas(?:e|ed|ing)", "dissipat\\w*", "clear(?:ed|ing)"];
+  var NEA_RE = new RegExp("\\b(" + NEA_NEG.concat(NEA_POS).sort(function (a, b) { return b.length - a.length; }).join("|") + ")\\b", "gi");
+  function neaPolarity(phrase) {
+    var p = phrase.toLowerCase();
+    return NEA_NEG.some(function (n) { return new RegExp("^" + n + "$", "i").test(p); }) ? "neg" : "pos";
+  }
+  function esc(t) { return t.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function renderOutlookDetail() {
+    var box = $("nea-outlook"), meta = $("nea-meta");
+    if (!box) return;
+    if (!OUTLOOK || !OUTLOOK.outlook_text) { meta.textContent = "NEA outlook not available right now."; box.innerHTML = ""; return; }
+    var dirWord = { worse: "more haze", better: "less haze", same: "no clear change", unclear: "no clear direction" }[OUTLOOK.direction] || "not read";
+    // the AI's own reason (and "readers disagreed" notes) stay in outlook.json; the page gives only the reading
+    var ok = OUTLOOK.status === "ok", tone = ok && OUTLOOK.direction === "worse" ? "neg" : ok && OUTLOOK.direction === "better" ? "pos" : "";
+    meta.innerHTML = "Updated " + esc(String(OUTLOOK.nea_updated)) + " · AI reading for Singapore: "
+      + '<span class="chip ' + tone + '">' + (ok ? dirWord : "unavailable") + "</span>";
+    // keep the southern ASEAN part (Singapore's region); drop sentences about the northern ASEAN / Mekong area
+    // NEA writes the southern part first, then "Meanwhile ... northern ASEAN region ...", and later sentences in
+    // that part don't repeat the region name. So track the region: once a sentence moves to the north, drop
+    // everything until one moves back to the south. (No regex lookbehind: older iOS Safari rejects the script.)
+    var north = false;
+    var sentences = (OUTLOOK.outlook_text.match(/[^.]+(?:\.|$)/g) || []).map(function (x) { return x.trim(); })
+      .filter(function (x) {
+        if (/southern ASEAN|Singapore/i.test(x)) north = false;
+        else if (/northern ASEAN|Mekong/i.test(x)) north = true;
+        return x && !north;
+      });
+    var html = esc(sentences.join(" ")).replace(NEA_RE, function (m) { return '<span class="hl ' + neaPolarity(m) + '">' + m + "</span>"; });
+    box.innerHTML = "<p>" + html + "</p>";
+  }
+
+  function renderTiles() {
+    var w = D.psi24.west, i = lastIdx(w);
+    if (i < 0) return;
+    var v = w[i], t = new Date(D.ts[i]).getTime();
+    var h1 = valueAt(w, t - 3600e3), h24 = valueAt(w, t - 24 * 3600e3);
+    // tint: lower PSI / PM2.5 than before = better (green), higher = worse (pink)
+    function tint(id, delta) {
+      var el = $(id).parentNode;
+      el.classList.toggle("better", delta != null && delta < 0);
+      el.classList.toggle("worse", delta != null && delta > 0);
+    }
+    tint("t1", h1 == null ? null : v - h1);
+    tint("t2", h24 == null ? null : v - h24);
+    $("t1").textContent = h1 == null ? "–" : signed(v - h1);
+    $("t1d").textContent = h1 == null ? "No reading an hour earlier" : v > h1 ? "Rising" : v < h1 ? "Falling" : "Steady";
+    $("t2").textContent = h24 == null ? "–" : h24;
+    $("t2d").textContent = h24 == null ? "" : (v > h24 ? "Worse now by " + (v - h24) : v < h24 ? "Better now by " + (h24 - v) : "Same as now");
+    var pm = D.pm25_1h.west, pi = lastIdx(pm);
+    if (pi >= 0) {
+      $("t3").innerHTML = pm[pi] + " <small>µg/m³</small>";
+      // 1-hr PM2.5 jumps around; a change under 5 µg/m³ counts as steady (no tint)
+      var p1 = valueAt(pm, new Date(D.ts[pi]).getTime() - 3600e3), dp = p1 == null ? null : pm[pi] - p1;
+      var dpm = dp == null || Math.abs(dp) < PM_STEADY ? 0 : dp;
+      tint("t3", dp == null ? null : dpm);
+      $("t3d").textContent = bandOf(pm[pi], PM_BANDS).say + " · " + fmtHour.format(new Date(D.ts[pi]))
+        + (dp == null ? "" : dpm > 0 ? " · up " + dp + " in 1 hr" : dpm < 0 ? " · down " + (-dp) + " in 1 hr" : " · steady");
+    }
+  }
+
+  function renderTable() {
+    var days = {}, order = [];
+    D.ts.forEach(function (t, i) {
+      var k = t.slice(0, 10);
+      if (!days[k]) { days[k] = { v: [], pm: [] }; order.push(k); }
+      if (D.psi24.west[i] != null) days[k].v.push(D.psi24.west[i]);
+      if (D.pm25_1h.west[i] != null) days[k].pm.push(D.pm25_1h.west[i]);
+    });
+    var tb = $("tbl"); tb.innerHTML = "";
+    order.reverse().forEach(function (k) {
+      var v = days[k].v, pm = days[k].pm;
+      if (!v.length) return;
+      var mx = Math.max.apply(null, v), mn = Math.min.apply(null, v);
+      var mean = Math.round(v.reduce(function (a, b) { return a + b; }, 0) / v.length);
+      var over = v.filter(function (x) { return x > WFH_ABOVE; }).length;
+      var tr = document.createElement("tr");
+      var label = fmtWeekday.format(new Date(k + "T12:00:00+08:00")) + (v.length < 24 ? " (so far)" : "");
+      [[label], [mx, mx > WFH_ABOVE], [mn], [mean], [over, over > 0], [pm.length ? Math.max.apply(null, pm) : "–"]]
+        .forEach(function (c) {
+          var td = document.createElement("td"); td.textContent = c[0]; if (c[1]) td.className = "hot"; tr.appendChild(td);
+        });
+      tb.appendChild(tr);
+    });
+  }
+
+  // opts: {series:[{key, values, color, width, main}], bands, yStep, yMin, range, threshold, label, compact}
+  function chart(container, opts) {
+    container.innerHTML = "";
+    var W = Math.max(300, container.clientWidth), narrow = W < 560;
+    var H = opts.compact ? (narrow ? 200 : 240) : (narrow ? 220 : 280);
+    var showBandNames = !narrow && !opts.compact;
+    var m = { t: 10, r: showBandNames ? 110 : 8, b: 24, l: 34 };
+    var n = D.ts.length, start = opts.range === "all" ? 0 : Math.max(0, n - opts.range);
+    var idx = []; for (var i = start; i < n; i++) idx.push(i);
+    var t0 = new Date(D.ts[start]).getTime(), t1 = new Date(D.ts[n - 1]).getTime();
+    if (t1 === t0) t1 = t0 + 3600e3;
+    var main0 = opts.series.filter(function (s) { return s.main; })[0];
+    var maxV = 0;
+    opts.series.forEach(function (s) { idx.forEach(function (i) { if (s.values[i] != null) maxV = Math.max(maxV, s.values[i]); }); });
+    var yLo = 0, yStep = opts.yStep, yMax;
+    if (opts.zoom) {
+      // Fit the axis to the readings on screen, always keeping the threshold line in view, so a
+      // 10-point move near 200 is visible instead of being flattened by an axis that starts at 0.
+      var minV = Infinity;
+      idx.forEach(function (i) { var v0 = main0.values[i]; if (v0 != null) minV = Math.min(minV, v0); });
+      var lo = Math.min(minV, opts.threshold), hi = Math.max(maxV, opts.threshold);
+      var span = Math.max(hi - lo, 20);
+      yStep = [5, 10, 20, 25, 50, 100].filter(function (st) { return span / st <= 5; })[0] || 100;
+      yLo = Math.max(0, Math.floor((lo - span * 0.12) / yStep) * yStep);
+      yMax = Math.ceil((hi + span * 0.12) / yStep) * yStep;
+    } else {
+      yMax = opts.yStep * Math.ceil(Math.max(maxV * 1.08, opts.yMin) / opts.yStep);
+    }
+    var x = function (t) { return m.l + (t - t0) / (t1 - t0) * (W - m.l - m.r); };
+    var y = function (v) { return m.t + (1 - (v - yLo) / (yMax - yLo)) * (H - m.t - m.b); };
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": opts.label }, container);
+
+    opts.bands.forEach(function (b) {
+      var lo = Math.max(yLo, b.lo === 0 ? 0 : b.lo - 1);
+      if (lo >= yMax || b.hi <= yLo) return;
+      var hi = Math.min(b.hi, yMax);
+      el("rect", { x: m.l, y: y(hi), width: W - m.l - m.r, height: y(lo) - y(hi), fill: css(b.c), "fill-opacity": css("--wash") }, svg);
+      if (showBandNames && y(lo) - y(hi) > 14) {
+        var tx = el("text", { x: W - m.r + 8, y: (y(lo) + y(hi)) / 2 + 4, "class": "band-label" }, svg);
+        tx.textContent = b.name;
+      }
+    });
+    for (var v = yLo; v <= yMax; v += yStep) {
+      el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: css(v === yLo ? "--axis" : "--grid"), "stroke-width": 1 }, svg);
+      var tl = el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg); tl.textContent = v;
+    }
+    if (opts.threshold && opts.threshold < yMax) {
+      el("line", { x1: m.l, x2: W - m.r, y1: y(opts.threshold), y2: y(opts.threshold), stroke: css("--hazard"), "stroke-width": 1.5 }, svg);
+      // label sits at the top of the red zone, away from where the line crosses 200
+      var rl = el("text", { x: m.l + 6, y: Math.min(y(yMax) + 14, y(opts.threshold) - 6), "class": "ref-label" }, svg);
+      rl.textContent = opts.thresholdLabel || "";
+    }
+    var spanH = (t1 - t0) / 3600e3, stepH = spanH <= 30 ? (narrow ? 6 : 3) : 24;
+    var dayEvery = Math.max(1, Math.ceil((spanH / 24) / ((W - m.l - m.r) / 60)));
+    var dayCount = 0;
+    idx.forEach(function (i) {
+      var t = new Date(D.ts[i]).getTime(), h = sgtHour(t);
+      if (h % stepH !== 0) return;
+      if (stepH === 24 && (dayCount++ % dayEvery)) return;
+      el("line", { x1: x(t), x2: x(t), y1: H - m.b, y2: H - m.b + 4, stroke: css("--axis") }, svg);
+      var tt = el("text", { x: x(t), y: H - 6, "text-anchor": "middle" }, svg);
+      tt.textContent = stepH === 24 || h === 0 ? fmtDay.format(new Date(t)) : fmtHour.format(new Date(t));
+    });
+    var main = opts.series.filter(function (s) { return s.main; })[0];
+    opts.series.slice().sort(function (a, b) { return a.main - b.main; }).forEach(function (s) {
+      var d = "", pen = false, prevT = null, area = "", first = null, lastX = null;
+      idx.forEach(function (i) {
+        var val = s.values[i], ti = new Date(D.ts[i]).getTime();
+        if (val == null) { pen = false; return; }
+        if (prevT !== null && ti - prevT > 1.5 * 3600e3) pen = false;  // missing hours: leave a gap
+        var px = x(ti).toFixed(1), py = y(val).toFixed(1);
+        d += (pen ? "L" : "M") + px + "," + py;
+        pen = true; prevT = ti;
+        if (first === null) first = px;
+        lastX = px; area += (area ? "L" : "M") + px + "," + py;
+      });
+      if (s.main && opts.fill && !opts.zoom && area) {  // an area implies a zero baseline; skip it on a zoomed axis
+        el("path", { d: area + "L" + lastX + "," + y(0) + "L" + first + "," + y(0) + "Z", fill: css(s.color), "fill-opacity": 0.1, stroke: "none" }, svg);
+      }
+      el("path", { d: d, fill: "none", stroke: css(s.color), "stroke-width": s.width, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg);
+    });
+    var li = -1; for (var j = idx.length - 1; j >= 0; j--) if (main.values[idx[j]] != null) { li = idx[j]; break; }
+    if (li >= 0) {
+      var ex = x(new Date(D.ts[li]).getTime()), ey = y(main.values[li]);
+      el("circle", { cx: ex, cy: ey, r: 4.5, fill: css(main.color), stroke: css("--surface"), "stroke-width": 2 }, svg);
+      if (opts.endLabel) {
+        var lab = el("text", { x: ex - 8, y: ey - 10, "text-anchor": "end", "class": "end-label" }, svg);
+        lab.textContent = main.values[li];
+      }
+    }
+    var cross = el("line", { y1: m.t, y2: H - m.b, stroke: css("--axis"), "stroke-width": 1, visibility: "hidden" }, svg);
+    var hdot = el("circle", { r: 5, fill: css(main.color), stroke: css("--surface"), "stroke-width": 2, visibility: "hidden" }, svg);
+    var tip = document.createElement("div"); tip.className = "tip"; container.appendChild(tip);
+    var hit = el("rect", { x: m.l, y: 0, width: W - m.l - m.r, height: H, fill: "transparent" }, svg);
+    function move(ev) {
+      var r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
+      var t = t0 + (px - m.l) / (W - m.l - m.r) * (t1 - t0);
+      var best = idx[0], bd = Infinity;
+      idx.forEach(function (i) { var dd = Math.abs(new Date(D.ts[i]).getTime() - t); if (dd < bd) { bd = dd; best = i; } });
+      var bx = x(new Date(D.ts[best]).getTime());
+      cross.setAttribute("x1", bx); cross.setAttribute("x2", bx); cross.setAttribute("visibility", "visible");
+      var mv = main.values[best];
+      if (mv != null) { hdot.setAttribute("cx", bx); hdot.setAttribute("cy", y(mv)); hdot.setAttribute("visibility", "visible"); }
+      else hdot.setAttribute("visibility", "hidden");
+      var html = '<div class="t">' + fmtFull.format(new Date(D.ts[best])) + "</div>";
+      opts.series.forEach(function (s) {
+        var val = s.values[best];
+        html += '<div class="row' + (s.main ? " main" : "") + '"><span>' + s.key + "</span><span>" + (val == null ? "–" : val) + "</span></div>";
+      });
+      if (mv != null && !opts.threshold) html += '<div class="t" style="margin:4px 0 0">' + bandOf(mv, opts.bands).name + "</div>";
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      var cw = container.clientWidth, sx = bx * r.width / W, tw = tip.offsetWidth;
+      tip.style.left = Math.min(Math.max(0, sx + 12 + tw > cw ? sx - tw - 12 : sx + 12), cw - tw) + "px";
+      tip.style.top = "8px";
+    }
+    function leave() { cross.setAttribute("visibility", "hidden"); hdot.setAttribute("visibility", "hidden"); tip.style.display = "none"; }
+    hit.addEventListener("pointermove", move);
+    hit.addEventListener("pointerdown", move);
+    hit.addEventListener("pointerleave", leave);
+  }
+
+  function renderCharts() {
+    chart($("main-chart"), {
+      label: "West region 24-hour PSI; green zone at or below 200, red zone above",
+      bands: [{ lo: 0, hi: WFH_ABOVE, name: "", c: "--good" }, { lo: WFH_ABOVE + 1, hi: 500, name: "", c: "--hazard" }], yStep: 50, yMin: 250,
+      range: mainRange, threshold: WFH_ABOVE, fill: true, compact: true, zoom: true, endLabel: true,
+      series: [{ key: "West PSI", values: D.psi24.west, color: "--west", width: 2.5, main: true }]
+    });
+    if (!$("more").open) return;
+    var names = { west: "West", central: "Central", east: "East", north: "North", south: "South" };
+    chart($("psi-chart"), {
+      label: "24-hour PSI by region; West highlighted",
+      bands: PSI_BANDS, yStep: 50, yMin: 150, range: "all",
+      series: D.regions.map(function (r) {
+        return { key: names[r], values: D.psi24[r], color: r === "west" ? "--west" : "--other", width: r === "west" ? 2 : 1, main: r === "west" };
+      })
+    });
+    chart($("pm-chart"), {
+      label: "1-hour PM2.5 for the West region",
+      bands: PM_BANDS, yStep: 50, yMin: 100, range: "all",
+      series: [{ key: "West PM2.5", values: D.pm25_1h.west, color: "--west", width: 2, main: true }]
+    });
+  }
+
+  function renderAll() { renderHero(); renderTrend(); renderTiles(); renderCharts(); renderTable(); }
+
+  document.querySelectorAll(".seg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      mainRange = b.dataset.range === "all" ? "all" : +b.dataset.range;
+      document.querySelectorAll(".seg button").forEach(function (o) { o.setAttribute("aria-pressed", o === b ? "true" : "false"); });
+      renderCharts();
+    });
+  });
+  $("more").addEventListener("toggle", function () { if (D) renderCharts(); });
+  var rt; window.addEventListener("resize", function () { clearTimeout(rt); rt = setTimeout(function () { if (D) renderCharts(); }, 120); });
+  if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { if (D) renderCharts(); });
+
+  function getJSON(url) {
+    return fetch(url, { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+
+  // Put one reading into D (append a new hour, or fill in the hour if it is already there).
+  function upsert(ts, field, readings, updated) {
+    var i = D.ts.indexOf(ts);
+    if (i < 0) {
+      if (D.ts.length && ts < D.ts[D.ts.length - 1]) return;
+      D.ts.push(ts); D.updated.push(null); i = D.ts.length - 1;
+      D.regions.forEach(function (r) { D.psi24[r].push(null); D.pm25_1h[r].push(null); });
+    }
+    D.regions.forEach(function (r) { if (readings[r] != null) D[field][r][i] = readings[r]; });
+    if (updated && field === "psi24") D.updated[i] = updated;
+  }
+
+  // The saved history is refreshed by an hourly job that can run late, so the page also asks
+  // data.gov.sg directly for the newest reading (the API allows browser requests).
+  // data.gov.sg allows only a few keyless calls per 10 s, likely per IP, so a roomful of people on
+  // one office network would be refused. Ask it only when the saved history is missing the newest
+  // reading NEA normally has out by now (hour H appears ~H:30-H:45; the saved copy catches it at :50).
+  function newestExpected() {
+    var t = Date.now() - 45 * 60e3;
+    return t - t % 3600e3;  // SGT has no DST and a whole-hour offset, so UTC flooring works
+  }
+  function savedHasNewest() {
+    if (!D) return false;
+    for (var i = D.ts.length - 1; i >= 0; i--) {
+      if (D.psi24.west[i] != null) return new Date(D.ts[i]).getTime() >= newestExpected();
+    }
+    return false;
+  }
+  function live() {
+    if (savedHasNewest()) { liveOk = true; liveAt = new Date(); return Promise.resolve(); }
+    return Promise.all([getJSON(LIVE + "psi"), getJSON(LIVE + "pm25")]).then(function (res) {
+      (res[0].data.items || []).forEach(function (it) {
+        upsert(it.timestamp, "psi24", it.readings.psi_twenty_four_hourly || {}, it.updatedTimestamp);
+      });
+      (res[1].data.items || []).forEach(function (it) {
+        upsert(it.timestamp, "pm25_1h", it.readings.pm25_one_hourly || {}, null);
+      });
+      liveOk = true; liveAt = new Date();
+    }).catch(function () { liveOk = false; liveAt = new Date(); });
+  }
+
+  // optional inputs for the trend panel; a failure just leaves that signal out
+  function extras() {
+    var o = getJSON("outlook.json").then(function (x) { OUTLOOK = x; }).catch(function () { OUTLOOK = null; });
+    var f = getJSON("forecast.json").then(function (x) {
+      var now = Date.now();
+      RAIN = (x.periods || [])
+        .filter(function (p) { return new Date(p.end).getTime() > now; })
+        .map(function (p) { return { text: p.text || "" }; });
+    }).catch(function () { RAIN = null; });
+    return Promise.all([o, f]);
+  }
+
+  function refresh() {
+    return getJSON("data.json").then(function (d) {
+      // GitHub Pages lets browsers keep this page for 10 min, and a pull-to-refresh can still show the
+      // cached copy. data.json is always revalidated, so when it names a newer page, load that one under
+      // a new URL (which no cache has). The ?v= check stops a reload loop if the CDN is briefly behind.
+      if (d.page && PAGE_VERSION.charAt(0) !== "_" && d.page !== PAGE_VERSION) {
+        var u = new URL(location.href);
+        if (u.searchParams.get("v") !== d.page) { u.searchParams.set("v", d.page); location.replace(u.toString()); }
+      }
+      D = d;
+    })
+      .catch(function () { if (!D) throw new Error("no data"); })
+      .then(function () { return Promise.all([live(), extras()]); }).then(renderAll)
+      .catch(function () {
+        $("h-answer").textContent = "Can't load data";
+        $("h-why").textContent = "Please refresh in a minute, or check haze.gov.sg.";
+      });
+  }
+  refresh();
+  // time of the last data check: every 5 min while open, and again whenever the page is reopened
+  function renderClock() {
+    $("live-t").textContent = liveAt
+      ? "Live · checked " + fmtHour.format(liveAt) : "Connecting…";
+  }
+  setInterval(refresh, 5 * 60e3);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
+})();
+</script>
+<!-- visit counter: one count per page open (the 5-minute refresh doesn't count again); path is fixed so ?v= reloads add to the same page -->
+<script data-goatcounter="https://jurong-haze.goatcounter.com/count" data-goatcounter-settings='{"path": "/haze/"}' async src="https://gc.zgo.at/count.js"></script>
+</body>
+</html>
